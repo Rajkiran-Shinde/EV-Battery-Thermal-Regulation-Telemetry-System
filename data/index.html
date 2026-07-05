@@ -94,6 +94,23 @@
                             <span id="charging-val">DISCHG</span>
                         </div>
                     </div>
+
+                    <div class="stat-card">
+                         <div class="card-header">
+                            <span>Cooling</span>
+                            <div class="info-icon" data-tooltip="Peltier cooling module status. Maintains temperature between 15-24°C in AUTO mode.">i</div>
+                        </div>
+                        <div class="card-value card-status-text">
+                            <span id="cooling-val">INACTIVE</span>
+                        </div>
+                        <div class="cooling-controls">
+                            <span id="cooling-mode-label" class="mode-label">Mode: AUTO</span>
+                            <div class="cooling-btn-group">
+                                <button class="cooling-btn" id="btn-toggle-mode" onclick="toggleCoolingMode()">MANUAL</button>
+                                <button class="cooling-btn" id="btn-toggle-peltier" onclick="togglePeltier()" disabled>TURN ON</button>
+                            </div>
+                        </div>
+                    </div>
                 </div> 
                 <div class="monitoring-buttons button-group">
                      <button class="neon-button" onclick="navigateTo('graphs-section')">GRAPHS</button>

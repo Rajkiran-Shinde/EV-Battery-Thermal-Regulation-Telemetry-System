@@ -20,16 +20,26 @@ const char* password = "MCUESP8266";
 #define SCL_PIN 22
 #define ONE_WIRE_BUS 4
 #define BUZZER_PIN 5
+#define PELTIER_PIN 18
 
 // Thresholds
 #define LOW_SOC_THRESHOLD 20.0
 #define HIGH_TEMP_THRESHOLD 45.0
 #define LOW_TEMP_THRESHOLD 5.0
+#define PELTIER_TEMP_HIGH 24.0  // Turn ON cooling above this temp
+#define PELTIER_TEMP_LOW  15.0  // Turn OFF cooling below this temp
 
 // OLED
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_ADDR 0x3C
+
+// Peltier Control Globals
+const bool PELTIER_ACTIVE_LOW = true;
+
+volatile bool peltierManualMode = false;   // false = AUTO, true = MANUAL
+volatile bool peltierManualState = false;  // ON/OFF state in MANUAL mode
+volatile bool currentPeltierState = false; // Actual state of the Peltier module
 
 /* ================= OBJECTS ================= */
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
@@ -46,6 +56,8 @@ struct SharedData {
   float soh;
   String status;
   bool isCharging;
+  bool peltierState;
+  String peltierMode; // "AUTO" or "MANUAL"
 };
 
 SharedData currentData;
@@ -66,6 +78,9 @@ void TaskCore0(void *pvParameters) {
 
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+
+  pinMode(PELTIER_PIN, OUTPUT);
+  digitalWrite(PELTIER_PIN, LOW);
 
   for (;;) {
 
@@ -137,6 +152,41 @@ void TaskCore0(void *pvParameters) {
     display.display();
     /* ========================================================== */
 
+    // Peltier control logic
+    bool activePeltier = false;
+    String modeStr = "AUTO";
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY)) {
+      if (peltierManualMode) {
+        activePeltier = peltierManualState;
+        currentPeltierState = activePeltier; // Keep currentPeltierState in sync in manual mode
+        modeStr = "MANUAL";
+      } else {
+        // Hysteresis control
+        if (temperature > PELTIER_TEMP_HIGH) {
+          currentPeltierState = true;
+        } else if (temperature < PELTIER_TEMP_LOW) {
+          currentPeltierState = false;
+        }
+        activePeltier = currentPeltierState;
+        peltierManualState = currentPeltierState; // Keep manual state synced in auto mode
+        modeStr = "AUTO";
+      }
+      xSemaphoreGive(dataMutex);
+    }
+
+    bool pinState = activePeltier;
+   if (PELTIER_ACTIVE_LOW) {
+  pinState = !activePeltier;
+}
+    digitalWrite(PELTIER_PIN, pinState ? HIGH : LOW);
+
+    static unsigned long lastPrint = 0;
+    if (millis() - lastPrint > 5000) {
+      Serial.printf("Temp: %.1f C | Peltier Mode: %s | Active: %s | Pin State: %s\n", 
+                    temperature, modeStr.c_str(), activePeltier ? "ON" : "OFF", pinState ? "HIGH" : "LOW");
+      lastPrint = millis();
+    }
+
     if (xSemaphoreTake(dataMutex, portMAX_DELAY)) {
       currentData.voltage = voltage;
       currentData.soc = soc;
@@ -144,6 +194,8 @@ void TaskCore0(void *pvParameters) {
       currentData.soh = soh;
       currentData.status = status;
       currentData.isCharging = isCharging;
+      currentData.peltierState = activePeltier;
+      currentData.peltierMode = modeStr;
       xSemaphoreGive(dataMutex);
     }
 
@@ -206,10 +258,33 @@ void setup() {
     json += "\"temp\":" + String(currentData.temp, 1) + ",";
     json += "\"status\":\"" + currentData.status + "\",";
     json += "\"charging\":" + String(currentData.isCharging ? "true" : "false") + ",";
+    json += "\"peltierState\":" + String(currentData.peltierState ? "true" : "false") + ",";
+    json += "\"peltierMode\":\"" + currentData.peltierMode + "\",";
     json += "\"uptime\":" + String(millis() / 1000) + "}";
     xSemaphoreGive(dataMutex);
 
     server.send(200, "application/json", json);
+  });
+
+  server.on("/api/control", HTTP_GET, []() {
+    xSemaphoreTake(dataMutex, portMAX_DELAY);
+    if (server.hasArg("mode")) {
+      String mode = server.arg("mode");
+      if (mode == "auto") {
+        peltierManualMode = false;
+      } else if (mode == "manual") {
+        if (!peltierManualMode) {
+          peltierManualState = currentPeltierState; // Sync initial state when entering manual mode
+        }
+        peltierManualMode = true;
+      }
+    }
+    if (server.hasArg("state")) {
+      String state = server.arg("state");
+      peltierManualState = (state == "1" || state == "on" || state == "true");
+    }
+    xSemaphoreGive(dataMutex);
+    server.send(200, "application/json", "{\"status\":\"success\"}");
   });
 
   server.begin();

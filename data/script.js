@@ -175,6 +175,39 @@ function updateDashboard(data) {
         document.getElementById('uptime-display').innerText = formatUptime(data.uptime);
     }
 
+    // Update Peltier cooling status
+    const coolingEl = document.getElementById('cooling-val');
+    if (coolingEl && data.peltierState !== undefined) {
+        if (data.peltierState) {
+            coolingEl.innerText = "ACTIVE";
+            coolingEl.style.color = "#2ecc71"; // Green for active cooling
+        } else {
+            coolingEl.innerText = "INACTIVE";
+            coolingEl.style.color = ""; // Default text color
+        }
+    }
+
+    const modeLabelEl = document.getElementById('cooling-mode-label');
+    if (modeLabelEl && data.peltierMode !== undefined) {
+        modeLabelEl.innerText = `Mode: ${data.peltierMode}`;
+    }
+
+    const btnToggleMode = document.getElementById('btn-toggle-mode');
+    if (btnToggleMode && data.peltierMode !== undefined) {
+        btnToggleMode.innerText = data.peltierMode === "AUTO" ? "MANUAL" : "AUTO";
+    }
+
+    const btnTogglePeltier = document.getElementById('btn-toggle-peltier');
+    if (btnTogglePeltier && data.peltierMode !== undefined) {
+        if (data.peltierMode === "MANUAL") {
+            btnTogglePeltier.disabled = false;
+            btnTogglePeltier.innerText = data.peltierState ? "TURN OFF" : "TURN ON";
+        } else {
+            btnTogglePeltier.disabled = true;
+            btnTogglePeltier.innerText = "TURN ON";
+        }
+    }
+
     // Check and Log State Changes
     if (lastState.charging === null) {
         // Initial load
@@ -336,6 +369,40 @@ function updateCharts(data) {
     socChart.data.labels = dataHistory.labels;
     socChart.data.datasets[0].data = dataHistory.soc;
     socChart.update();
+}
+
+
+// ================= COOLING USER INTERACTIONS =================
+async function toggleCoolingMode() {
+    const modeLabelEl = document.getElementById('cooling-mode-label');
+    if (!modeLabelEl) return;
+    const currentMode = modeLabelEl.innerText.includes("AUTO") ? "AUTO" : "MANUAL";
+    const targetMode = currentMode === "AUTO" ? "manual" : "auto";
+    
+    try {
+        const response = await fetch(`/api/control?mode=${targetMode}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        // Instantly poll data to reflect changes fast
+        fetchDataFromESP();
+    } catch (error) {
+        console.error('Error toggling cooling mode:', error);
+    }
+}
+
+async function togglePeltier() {
+    const btnTogglePeltier = document.getElementById('btn-toggle-peltier');
+    if (!btnTogglePeltier) return;
+    const currentStateIsOn = btnTogglePeltier.innerText.includes("OFF");
+    const targetState = currentStateIsOn ? "off" : "on";
+    
+    try {
+        const response = await fetch(`/api/control?state=${targetState === "on" ? "1" : "0"}`);
+        if (!response.ok) throw new Error('Network response was not ok');
+        // Instantly poll data to reflect changes fast
+        fetchDataFromESP();
+    } catch (error) {
+        console.error('Error toggling Peltier power:', error);
+    }
 }
 
 
